@@ -7,6 +7,7 @@ import dbus.service
 import gobject
 import gtk
 import socket
+import string
 import subprocess
 import syslog
 import time
@@ -18,29 +19,31 @@ DBusGMainLoop(set_as_default=True)
 bus = dbus.SystemBus()
 
 class vdrPIP():
-    def __init__(self):
-        cmd = ['/usr/bin/vdr','-c','/var/lib/vdr-pip',
+    def __init__(self,wnckctrl):
+        self.cmd = ['/usr/bin/vdr','-c','/var/lib/vdr-pip',
         '-L', '/usr/lib/vdr/plugins',
         '-D', '10', '-p', '2101',
-        '-P','softhddevice','-a""',
+        '-P','softhddevice','-a','none',
         '-Pstreamdev-client',
+        '-i','1',
         '--lirc=/dev/null',
         '-v','/srv/share/vdr',
         '--no-kbd']
-        self.screenX = wnckC.screen_height
-        self.screenY = wnckC.screen_width
+        self.screenX = wnckctrl.screen_height
+        self.screenY = wnckctrl.screen_width
         self.pipX = 720 * self.screenX / 1920
         self.pipY = self.pipX * self.screenY/self.screenX
         self.marginX = 10
         self.marginY = 10
+        self.proc = None
 
-    def run_vdr(self,cmd):
-        settings.apps['vdr-pip'] = subprocess.Popen(cmd) # Spawn process
-        gobject.child_watch_add(proc.pid,self.on_exit,proc) # Add callback on exit
-        #settings.
+    def run_vdr(self):
+        self.proc = subprocess.Popen(self.cmd) # Spawn process
+        gobject.child_watch_add(self.proc.pid,self.on_exit,self.proc) # Add callback on exit
 
     def on_exit(self,pid, condition,data):
-        print "called function with pid=%s, condition=%s, data=%s"%(pid, condition,data)
+        print "exit vdr-pip, called function with pid=%s, condition=%s, data=%s"%(pid, condition,data)
+        self.proc = None
 
 
 class dbusRemote():
@@ -218,7 +221,7 @@ class Settings():
         while pulse == 1:
           try:
             if "module-native-protocol-tcp" in subprocess.check_output(["/usr/bin/pactl","list","modules"]): pulse = 0
-            time.sleep(0.5)
+            time.sleep(1)
           except subprocess.CalledProcessError: pulse = 1
 
     def SetTimeout(self,timeout_s,call_f):
@@ -268,6 +271,65 @@ class Settings():
                 for j, _substring in enumerate(substack):
                     stack.insert(i+j, _substring)
         return stack
+
+class dbusPIP(dbus.service.Object):
+    def __init__(self,wnckctrl):
+        bus_name = dbus.service.BusName('de.yavdr.frontend', bus=bus)#dbus.SessionBus())
+        dbus.service.Object.__init__(self, bus_name, '/pip')
+        self.vdr = vdrPIP(wnckctrl)
+
+    @dbus.service.method('de.yavdr.frontend',out_signature='b')
+    def start(self):
+        if self.vdr.proc == None:
+            self.vdr.run_vdr()
+            return True
+        else: return False
+
+    @dbus.service.method('de.yavdr.frontend',out_signature='b')
+    def stop(self):
+        if self.vdr.proc:
+            self.vdr.proc.terminate()
+            self.vdr.proc = None
+            return True
+        else: return False
+
+    @dbus.service.method('de.yavdr.frontend',out_signature='b')
+    def toggle(self):
+        if self.vdr.proc == None:
+            self.vdr.run_vdr()
+            return True
+        else:
+            self.vdr.proc.terminate()
+            self.vdr.proc = None
+            return True
+
+    @dbus.service.method('de.yavdr.frontend',out_signature='b')
+    def sbs(self):
+        main_window = wnckC.windows['softhddevice_main']
+        pip_window = wnckC.windows['softhddevice_pip']
+        if main_window == None:
+            frontend.attach()
+            time.sleep(1)
+        wnckC.resize(main_window,0,0,1600,900,0,0)
+        if pip_window == None:
+            self.start()
+            time.sleep(1)
+
+        wnckC.resize(pip_window,1200,795,720,405,0,0)
+
+        return True
+
+
+    @dbus.service.method('de.yavdr.frontend',in_signature='sii',out_signature='b')
+    def resize(self,s,above,decoration):
+        w,h,x,y = settings.tsplit(s,('x','+'))
+        print(x,y,w,h)
+        window = wnckC.windows['softhddevice_pip']
+        if window:
+            wnckC.resize(window,int(x),int(y),int(w),int(h),above,decoration)
+            return True
+        else:
+            return False
 
 class dbusService(dbus.service.Object):
     def __init__(self):
@@ -342,6 +404,17 @@ class dbusService(dbus.service.Object):
         else:
             return False
 
+    @dbus.service.method('de.yavdr.frontend',in_signature='isii',out_signature='b')
+    def resizexid(self,xid,s,above,decoration):
+        w,h,x,y = settings.tsplit(s,('x','+'))
+        print(x,y,w,h)
+        if window:
+            gdkwindow = gtk.gdk.window_foreign_new(xid)
+            wnckC.resize(window,int(x),int(y),int(w),int(h),above,decoration)
+            return True
+        else:
+            return False
+
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def shutdown(self):
         remote.enable()
@@ -393,7 +466,9 @@ def handler(sock, *args):
                 resume(frontend.status())
         elif cmd == settings.conf['key_xbmc'] and settings.external_prog == 0:
                 settings.external_prog = 1
-                gobject.timeout_add(50, start_xbmc)
+                #gobject.timeout_add(50, start_xbmc)
+                cmd = ['/usr/lib/xbmc/xbmc.bin','--standalone','--lircdev','/var/run/lirc/lircd']
+                gobject.timeout_add(50, start_app,cmd)
                 return True
 
         elif cmd == settings.conf['key_power']:
@@ -410,8 +485,8 @@ def handler(sock, *args):
                 pass
     return True
 
-def start_app(cmd):
-    if settings.frontend_active == 1:
+def start_app(cmd,detachf=False):
+    if settings.frontend_active == 1 and detachf == True:
         detach()
         wnckC.windows['softhddevice_main'] = None
         settings.reattach = 1
@@ -443,7 +518,7 @@ def reset_external_prog():
     return False
 
 def startup():
-    settings.check_pulseaudio()
+
     # check if vdr was started for a timer or an acpi_wakeup event, if not attach frontend
     if settings.manualstart == True and settings.acpi_wakeup != True and settings.conf['start_always_detached'] == '0':
         resume(frontend.status())
@@ -486,6 +561,7 @@ class wnckController():
         window.connect('name-changed', self.window_name_changed)
         self.window_name_changed(window)
 
+
     def window_name_changed(self, window):
         wname = window.get_name()
         if wname in self.windownames:
@@ -498,7 +574,7 @@ class wnckController():
                 elif self.windows['softhddevice_pip'] == None and self.windows['softhddevice_main'].get_xid() != window.get_xid():
                     print("softhddevice_pip")
                     self.windows['softhddevice_pip'] = window
-                    self.resize(window,800,480,720,405,1,0)
+                    self.resize(window,1200,795,720,405,1,0)
                 elif window.get_xid() == self.windows['softhddevice_main'].get_xid():
                     print("main window already defined")
                 else:
@@ -563,7 +639,7 @@ class wnckController():
         print("Closed Window %s"%(window.get_name()))
         if window in self.windows.itervalues():
             WindowKey = [key for key, value in self.windows.iteritems() if value == window][0]
-            #print WindowKey
+            print WindowKey
             self.windows[WindowKey] = None
 
 class lircConnection():
@@ -607,8 +683,13 @@ if __name__ == '__main__':
     remote = dbusRemote()
     shutdown = dbusShutdown()
     setup = dbusSetup()
+
     # initzialize settings (and environment variables)
     settings = Settings()
+    wnckC = wnckController()
+    pip = dbusPIP(wnckC)
+    # wait until pulseaudio module pulseaudio-native-tcp has been loaded
+    settings.check_pulseaudio()
     # Connect to lirc socket
     try_connection()
     startup()
@@ -616,5 +697,5 @@ if __name__ == '__main__':
     dbusservice = dbusService()
     while gtk.events_pending():
         gtk.main_iteration()
-    wnckC = wnckController()
+
     gtk.main()
