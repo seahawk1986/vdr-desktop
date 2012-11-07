@@ -1,1 +1,1 @@
-Convert to templates/scripts or probalby better use /etc/skel to provide a standard configuration
+Convert to templates/scripts or probalby better use /etc/skel and/or /etc/profile to provide a standard configuration
