@@ -17,6 +17,17 @@ from dbus.mainloop.glib import DBusGMainLoop
 
 DBusGMainLoop(set_as_default=True)
 bus = dbus.SystemBus()
+sbus = dbus.SessionBus()
+
+class adeskbarDBus():
+    '''wrapper for adeskbar'''
+    def __init__(self):
+        self.adeskbar = sbus.get_object("com.adcomp.adeskbar","/Control")
+        self.interface = 'com.adcomp.adeskbar'
+
+    def hide(self):
+        answer = self.adeskbar.hide(dbus_interface=self.interface)
+        return False
 
 class vdrPIP():
     def __init__(self,wnckctrl):
@@ -43,7 +54,7 @@ class vdrPIP():
         -l 3 \
         -p 2101 \
         -E- \
-        -P "softhddevice -D" \
+        -P "softhddevice -D -g 720x405+0+0" \
         -Pdbus2vdr \
         -Pstreamdev-client \
         -v /srv/share/vdr \
@@ -81,6 +92,9 @@ class vdrPIP():
 
     def detach(self):
         self.shddbus.SVDRPCommand(dbus.String("deta"),dbus.String(''),dbus_interface=self.interface)
+
+    def stopvdr(self):
+        self.proc.terminate()
 
     def on_exit(self,pid, condition,data):
         print "exit vdr-pip, called function with pid=%s, condition=%s, data=%s"%(pid, condition,data)
@@ -336,9 +350,8 @@ class dbusPIP(dbus.service.Object):
     def start(self):
         if self.vdr.proc == None:
             self.vdr.run_vdr()
-            self.vdr.attach()
-            return True
-        else: return False
+        self.vdr.attach()
+        return True
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def stop(self):
@@ -347,7 +360,7 @@ class dbusPIP(dbus.service.Object):
             frontend.attach()
             time.sleep(1)
         self.wnckctrl.maximize_and_undecorate(main_window)
-        if self.vdr.proc:
+        if self.vdr.proc != None:
             #self.vdr.proc.terminate()
             #self.vdr.proc = None
             self.vdr.detach()
@@ -397,6 +410,7 @@ class dbusPIP(dbus.service.Object):
         self.wnckctrl.resize(pip_window,1200,795,720,405,0,0)
         pip_window.make_above()
         gobject.timeout_add(500,self.activateWindow,main_window)
+        gobject.timeout_add(800,adeskbar.hide)
         return True
 
 
@@ -719,7 +733,7 @@ class wnckController():
             #gdkwindow.set_decorations(1)
 
     def on_window_closed(self,screen,window):
-        print("Closed Window %s"%(window.get_name()))
+        print("Closed Window %s:"%(window.get_name()))
         if window in self.windows.itervalues():
             WindowKey = [key for key, value in self.windows.iteritems() if value == window][0]
             print WindowKey
@@ -766,6 +780,7 @@ if __name__ == '__main__':
     remote = dbusRemote()
     shutdown = dbusShutdown()
     setup = dbusSetup()
+    adeskbar = adeskbarDBus()
 
     # initzialize settings (and environment variables)
     settings = Settings()
