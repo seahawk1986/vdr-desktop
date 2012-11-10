@@ -31,21 +31,6 @@ class adeskbarDBus():
 
 class vdrPIP():
     def __init__(self,wnckctrl):
-        '''self.cmd = ['/usr/bin/vdr',
-        '-i','1'
-        '-m',
-        '-c','/var/lib/vdr-pip',
-        '-L', '/usr/lib/vdr/plugins',
-        #'-D', '10',
-        '-l','0',
-        '-p', '2101',
-        '-E-',
-        '-P','softhddevice -D',
-        '-Pdbus2vdr',
-        '-Pstreamdev-client',
-        '--lirc=/dev/null',
-        '-v','/srv/share/vdr',
-        '--no-kbd']'''
         self.cmd = ['/usr/bin/vdr \
         -i 1 \
         -m \
