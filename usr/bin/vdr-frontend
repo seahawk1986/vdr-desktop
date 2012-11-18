@@ -1,23 +1,93 @@
-import os
-import sys
+#!/usr/bin/python2
+# vim: set fileencoding=utf-8 :
+# Alexander Grothe 2012
+
 import codecs
 import datetime
 import dbus
 import dbus.service
+import fcntl
 import gobject
 import gtk
+import neo_cgi
+import neo_util
+import os
+import re
 import socket
 import string
 import subprocess
+import sys
 import syslog
 import time
 import wnck
+
+from optparse import OptionParser
 
 from dbus.mainloop.glib import DBusGMainLoop
 
 DBusGMainLoop(set_as_default=True)
 bus = dbus.SystemBus()
 sbus = dbus.SessionBus()
+
+
+# traxanos HDF-Class (https://github.com/yavdr/yavdr-utils/blob/experimental/scripts/yavdr-db-tool)
+class HDF:
+    def __init__(self, file):
+        self.file = file
+        self.hdf = neo_util.HDF()
+        self.readFile()
+    def readKey(self, key, default = ""):
+        return self.hdf.getValue(key, default)
+    def writeKey(self, key, value):
+        return self.hdf.setValue(key, value)
+    def deleteKey(self, key):
+        return self.hdf.removeTree(key)
+    def dumpKey(self, key):
+        dump = []
+        for entry in self.hdf.dump().split("\n"):
+            regex = re.compile('^%s'%key)
+            if entry != "" and (key == '.' or re.search(regex, entry)):
+                dump.append(entry)
+        return "\n".join(dump)
+    def childrensByKey(self, key):
+        childrens = []
+        dataset = self.hdf.getObj(key)
+        try:
+            child = dataset.child()
+            while child:
+                childrens.append(child.name())
+                child = child.next()
+        except:
+            pass
+        return childrens
+    def checkKey(self, key):
+        if self.readKey(key, "NULLNULLNULL") == "NULLNULLNULL":
+            if len(self.childrensByKey(key)) > 0:
+                return True
+            else:
+                return False
+        else:
+            return True
+    def presetKey(self, key, value):
+        if not self.checkKey(key):
+            self.writeKey(key, value)
+    def readFile(self):
+        if os.path.exists(self.file) and os.path.isfile(self.file):
+            return self.hdf.readFile(self.file);
+    def writeFile(self):
+        return self.hdf.writeFile(self.file);
+    def __str__( self ):
+        return self.hdf.dump()
+
+class Options:
+    def __init__(self):
+        self.parser = OptionParser()
+        self.parser.add_option("-c", "--hdf", dest="hdf_file", default=None,
+            help=u"choose clearsilver hdf file", metavar="HDF_FILE")
+
+    def get_opts(self):
+        (options, args) = self.parser.parse_args()
+        return options
 
 class adeskbarDBus():
     '''wrapper for adeskbar'''
@@ -44,7 +114,7 @@ class vdrPIP():
         -Pstreamdev-client \
         -v /srv/share/vdr \
         --no-kbd']
-        #-g 720x405+1200+795" \
+        #print hdf.readKey('vdr.pip.cmd',None)
         self.screenX = wnckctrl.screen_height
         self.screenY = wnckctrl.screen_width
         self.pipX = 720 * self.screenX / 1920
@@ -230,7 +300,10 @@ class Settings():
         self.external_prog = 0
         self.env = os.environ
         self.timer = None
-
+        # Get Values from HDF
+        parser = Options()
+        self.options = parser.get_opts()
+        #self.hdf = HDF(self.options.hdf_file)
         self.manualstart = shutdown.manualstart()
         try:
             self.acpi_wakeup = self.check_acpi()
@@ -251,6 +324,8 @@ class Settings():
         for i in self.conf:
             if i in os.environ:
                 self.conf[i] = os.environ[i]
+
+
         # *** END TODO ***
         self.check_graphtft()
         self.updateDisplay()
@@ -391,10 +466,11 @@ class dbusPIP(dbus.service.Object):
                 self.vdr.run_vdr()
             self.vdr.attach()
             time.sleep(2)
-
-        self.wnckctrl.resize(pip_window,1200,795,720,405,0,0)
-        pip_window.make_above()
-        gobject.timeout_add(500,self.activateWindow,main_window)
+        if pip_window != None:
+            self.wnckctrl.resize(pip_window,1200,795,720,405,0,0)
+            pip_window.make_above()
+        if main_window != None:
+            gobject.timeout_add(500,self.activateWindow,main_window)
         gobject.timeout_add(800,adeskbar.hide)
         return True
 
@@ -581,6 +657,9 @@ def on_exit(pid, condition,data):
         if condition == 0:
             print "normal exit"
             gobject.timeout_add(500,reset_external_prog)
+        elif condition < 16384:
+            print "abnormal exit: %s"%(condition)
+            gobject.timeout_add(500,reset_external_prog)
         elif condition == 16384:
             print "shutdown"
             send_shutdown(user=True)
@@ -590,6 +669,7 @@ def on_exit(pid, condition,data):
 
 def reset_external_prog():
     if settings.reattach == 1:
+        print "resume"
         resume(frontend.status())
         settings.frontend_active = 1
     else:
@@ -668,7 +748,7 @@ class wnckController():
                     window.set_fullscreen(0)
                     window.maximize()
                     #window.make_below()
-                    window.unmake_abvove()
+                    window.unmake_above()
 
     def maximize_and_undecorate(self,window):
         print("Window recognized: %s"%window.get_name())
@@ -688,17 +768,19 @@ class wnckController():
 
     def resize(self,window,x=0,y=0,w=1280,h=720,above=0,d=0):
         print("run resize")
-        if window.is_fullscreen():
-            window.set_fullscreen(0)
-        if window.is_maximized():
-            window.unmaximize()
-        if above == 1:
-            window.make_above()
-        else:
-            window.unmake_above()
-        window.set_geometry(0,255,x,y,w,h)
-        gdkwindow = gtk.gdk.window_foreign_new(window.get_xid())
-        gdkwindow.set_decorations(d)
+        if window != None:
+            if window.is_fullscreen():
+                window.set_fullscreen(0)
+            if window.is_maximized():
+                window.unmaximize()
+            if above == 1:
+                window.make_above()
+            else:
+                window.unmake_above()
+            window.set_geometry(0,255,x,y,w,h)
+            gdkwindow = gtk.gdk.window_foreign_new(window.get_xid())
+            gdkwindow.set_decorations(d)
+        adeskbar.hide()
 
     def on_window_geochanged(self,window):
         print("Window Geometry changed")
