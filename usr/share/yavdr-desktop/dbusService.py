@@ -57,17 +57,18 @@ class dbusService(dbus.service.Object):
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def start_xbmc(self):
-        if not settings.external_prog == 1:
+        if not self.main_instance.settings.external_prog == 1:
             self.main_instance.settings.external_prog = 1
             cmd = ['/usr/lib/xbmc/xbmc.bin','--standalone','--lircdev','/var/run/lirc/lircd']
-            start_app(cmd)#
+            self.main_instance.start_app(cmd)#
             return True
 
     @dbus.service.method('de.yavdr.frontend',in_signature='si',out_signature='b')
     def start_application(self,cmd,standalone=0):
         self.main_instance.settings.external_prog = 1
-        start_app(cmd)#
+        self.main_instance.start_app(cmd)#
         return True
+        
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def fullscreen(self):
