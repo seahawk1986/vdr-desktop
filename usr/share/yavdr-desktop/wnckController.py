@@ -3,6 +3,8 @@
 # Alexander Grothe 2012
 
 import dbus
+from dbus.mainloop.glib import DBusGMainLoop
+DBusGMainLoop(set_as_default=True)
 import wnck
 
 class wnckController():

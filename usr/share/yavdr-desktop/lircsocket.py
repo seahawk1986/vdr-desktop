@@ -5,6 +5,8 @@
 import gobject
 import logging
 import socket
+from dbus.mainloop.glib import DBusGMainLoop
+DBusGMainLoop(set_as_default=True)
 
 class lircConnection():
     def __init__(self,vdrCommands,socket_path="/var/run/lirc/lircd"):

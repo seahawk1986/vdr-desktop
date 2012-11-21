@@ -4,15 +4,18 @@
 
 import logging
 import os
+import dbus
+from dbus.mainloop.glib import DBusGMainLoop
+DBusGMainLoop(set_as_default=True)
 
 
 class Settings():
     ''' read and store configuration, handle input devices using udev'''
-    def __init__(self,bus,hdf,options,vdrCommands):
-        self.hdf = hdf
-        self.bus = bus
-        self.options = options
-        self.vdrCommands = vdrCommands
+    def __init__(self,main_instance):
+        self.hdf = main_instance.hdf
+        self.bus = main_instance.systembus
+        self.options = main_instance.options
+        self.vdrCommands = main_instance.vdrCommands
         self.frontend_active = 0
         self.external_prog = 0
         self.env = os.environ

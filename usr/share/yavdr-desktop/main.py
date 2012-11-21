@@ -51,25 +51,30 @@ class Main():
         logging.info(u"Started yavdr-frontend")
         # dbus SystemBus and SessionBus
         try:
-            systembus = dbus.SystemBus()
+            self.systembus = dbus.SystemBus()
             logging.info(u'Connected to SystemBus')
         except:
             logging.exception(u"could not connect to SystemBus")
             sys.exit(1)
         try:
-            sessionbus = dbus.SessionBus()
+            self.sessionbus = dbus.SessionBus()
             logging.info(u'Connected to SessionBus')
         except:
             logging.exception(u"could not connect to SessionBus")
             sys.exit(1)
+        '''try:
+            self.dbus = dbusservice.DBusService(self, self,systembus)
+        except:
+            logging.exception(u"could not creeate SystemBus Service")
+            sys.exit(1)'''
+        
         
         # load hdf
         self.hdf = HDF(options.hdf_file)
-        # dbus2vdr /Setup fuctions
-        self.vdrCommands = vdrDBusCommands(systembus)
-        # check if graphtft is running
-        self.graphtft = GraphTFT(systembus,self.hdf,self.vdrCommands.vdrSetup)
-        self.settings = Settings(systembus,self.hdf,self.options,self.vdrCommands)
+        # dbus2vdr fuctions
+        self.vdrCommands = vdrDBusCommands(self)
+        self.settings = Settings(self)
+        self.graphtft = GraphTFT(self)
         self.lircConnection = lircConnection(self.vdrCommands)
      
         
