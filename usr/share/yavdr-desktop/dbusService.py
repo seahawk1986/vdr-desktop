@@ -9,6 +9,8 @@ DBusGMainLoop(set_as_default=True)
 
 import logging
 import gtk
+import gobject
+import time
 
 from vdrPIP import vdrPIP
 
@@ -213,7 +215,7 @@ class dbusPIP(dbus.service.Object):
             #self.vdr.proc = None
             main_window = self.wnckctrl.windows['softhddevice_main']
             if main_window != None:
-                frontend.attach()
+                self.main_instance.frontend.attach()
                 time.sleep(1)
                 self.wnckctrl.maximize_and_undecorate(main_window)
             gobject.timeout_add(500,self.activateWindow,main_window)
@@ -237,14 +239,14 @@ class dbusPIP(dbus.service.Object):
             pip_window.make_above()
         if main_window != None:
             gobject.timeout_add(500,self.activateWindow,main_window)
-        gobject.timeout_add(800,adeskbar.hide)
+        gobject.timeout_add(800,self.main_instance.adeskbar.hide)
         return True
 
 
     @dbus.service.method('de.yavdr.frontend',in_signature='sii',out_signature='b')
     def resize(self,s,above,decoration):
-        w,h,x,y = main_instance.settings.tsplit(s,('x','+'))
-        print(x,y,w,h)
+        w,h,x,y = self.main_instance.settings.tsplit(s,('x','+'))
+        logging.debug(u"%sx%s+%s+%s",x,y,w,h)
         window = self.wnckctrl.windows['softhddevice_pip']
         if window:
             self.wnckctrl.resize(window,int(x),int(y),int(w),int(h),above,decoration)

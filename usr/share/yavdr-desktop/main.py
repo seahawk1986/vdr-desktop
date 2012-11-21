@@ -59,10 +59,10 @@ class Main():
             logging.exception(u"could not connect to SessionBus")
             sys.exit(1)   
         
-        # init hdf
         self.hdf = HDF(options.hdf_file)
-        # wait for VDR running
+        # wait for VDR upstart job status running
         self.running = self.wait_for_vdrstart()
+        # Add watchdog for vdr-upstart-job to detect stopping and restarts
         try:
             logging.debug(u'connecting to upstart')
             self.upstart_vdr = self.systembus.get_object("org.freedesktop.DBus","/com/ubuntu/Upstart/jobs/vdr")
@@ -73,20 +73,13 @@ class Main():
         except dbus.DBusException:
             logging.debug(u'ran into exception')
             logging.exception(traceback.print_exc())
-        # dbus2vdr fuctions
-        self.vdrCommands = vdrDBusCommands(self)
-        
-        # dbus Control for yavdr-frontend
+
+        self.vdrCommands = vdrDBusCommands(self) # dbus2vdr fuctions
         self.dbusService = dbusService.dbusService(self)
-        # Settings for frontend process
         self.settings = Settings(self)
         self.graphtft = GraphTFT(self)
-        # wnck Window Controller
         self.wnckC = wnckController(self)
-        
-        # PIP Class
         self.dbusPIP = dbusService.dbusPIP(self)
-        # Adeskbar control
         self.adeskbar = adeskbarDBus(self.systembus)
         # connect to (event)lircd-Socket
         self.lircConnection = lircConnection(self,self.vdrCommands)
@@ -99,8 +92,7 @@ class Main():
         # dbus2vdr fuctions
         self.vdrCommands = vdrDBusCommands(self)
         self.graphtft = GraphTFT(self)
-        
-        
+
         if self.hdf.readKey('vdr.frontend') == 'softhddevice' and self.vdrCommands.vdrSofthddevice:
             logging.info(u'Configured softhddevide as primary frontend')
             self.frontend = self.vdrCommands.vdrSofthddevice
@@ -134,7 +126,7 @@ class Main():
                     self.running = True
                     logging.debug(u"vdr upstart job running")
                     #self.frontend.attach()
-                if 'waiting' in args[0]:
+                if 'pre-stop' in args[0]:
                     self.running = False
                     logging.debug(u"vdr upstart job stopped/waiting")
             elif kwargs['member'] == "InstanceRemoved":

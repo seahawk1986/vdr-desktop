@@ -51,7 +51,7 @@ class vdrPIP():
             try:
                 self.shddbus = self.main_instance.systembus.get_object("de.tvdr.vdr1","/Plugins/softhddevice")
             except:
-                logging.debug(u"dbu2vdr not ready")
+                logging.debug(u"dbus2vdr not jet ready")
                 time.sleep(0.5)
 
 
