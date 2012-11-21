@@ -56,9 +56,11 @@ class Main():
             logging.info(u'Connected to SessionBus')
         except:
             logging.exception(u"could not connect to SessionBus")
-            sys.exit(1)      
+            sys.exit(1)   
         # init hdf
         self.hdf = HDF(options.hdf_file)
+        # wait for VDR running
+        self.wait_for_vdrstart()
         # dbus2vdr fuctions
         self.vdrCommands = vdrDBusCommands(self)
         # Settings for frontend process
@@ -79,6 +81,25 @@ class Main():
             logging.info(u'Configured softhddevide as primary frontend')
             self.frontend = self.vdrCommands.vdrSofthddevice
         self.frontend.attach()
+        
+    def wait_for_vdrstart(self):
+        self.vdr_status = self.systembus.get_object("de.tvdr.vdr","/Status")
+        status_interface = self.interface = 'de.tvdr.vdr'
+        upstart = self.systembus.get_object("com.ubuntu.Upstart", "/com/ubuntu/Upstart")
+        status = None
+        while not status == 'start/running':
+            path = upstart.GetJobByName("vdr", dbus_interface="com.ubuntu.Upstart0_6")
+            job = self.systembus.get_object("com.ubuntu.Upstart", path)
+            path = job.GetInstance([], dbus_interface="com.ubuntu.Upstart0_6.Job")
+            instance = self.systembus.get_object("com.ubuntu.Upstart", path)
+            props = instance.GetAll("com.ubuntu.Upstart0_6.Instance", dbus_interface=dbus.PROPERTIES_IFACE)
+            status = "%s/%s"%(props["goal"], props["state"])
+            if not status: 
+                logging.info('vdr upstart job not running, wait 1 s')
+                time.sleep(1)
+            else:
+                logging.info('vdr upstart job running')
+                return True
         
     def start_app(self,cmd,detachf=True):
         if self.settings.frontend_active == 1 and detachf == True:
