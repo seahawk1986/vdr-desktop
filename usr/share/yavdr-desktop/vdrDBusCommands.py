@@ -12,7 +12,7 @@ class vdrDBusCommands():
     def __init__(self,main_instance):
         self.main_instance = main_instance
         self.vdrSetup = dbusVDRSetup(main_instance.systembus)
-        self.vdrShutdown = dbusShutdown(main_instance.systembus)
+        self.vdrShutdown = dbusShutdown(main_instance.systembus,main_instance)
         self.vdrRemote = dbusRemote(main_instance.systembus)
         if self.vdrSetup.check_plugin('softhddevice'):
             self.vdrSofthddevice = dbusSofthddeviceFrontend(main_instance,self)
@@ -101,28 +101,35 @@ class dbusSofthddeviceFrontend():
         return mode.split()[-1]
 
     def attach(self):
-        display = dbus.String("-d %s"%(settings.env["DISPLAY"]))
+        logging.debug(u"attaching softhddevice frontend")
+        display = u"-d "+self.main_instance.hdf.readKey('yavdr.desktop.display')+".0"
         reply, answer = self.dbusfe.SVDRPCommand(dbus.String("ATTA"),display,dbus_interface=self.interface)
+        logging.debug(u"got answer %s: %s",reply,answer)
         self.parent.vdrRemote.enable()
-        settings.frontend_active = 1
+        self.main_instance.settings.frontend_active = 1
 
     def detach(self,active=0):
+        logging.debug(u"detaching softhddevice frontend")
         reply, answer = self.dbusfe.SVDRPCommand(dbus.String("DETA"),dbus.String(None),dbus_interface=self.interface)
+        logging.debug(u"got answer %s: %s",reply,answer)
         self.parent.vdrRemote.disable()
-        settings.frontend_active = 0
+        self.main_instance.settings.frontend_active = 0
         if active == 1:
             settings.frontend_active = 1
             settings.external_prog = 1
         return True
 
     def resume(self,status):
+        logging.debug(u"resuming softhddevice frontend")
         reply, answer = self.dbusfe.SVDRPCommand(dbus.String("RESU"),dbus.String(None),dbus_interface=self.interface)
-        settings.frontend_active = 1
+        logging.debug(u"got answer %s: %s",reply,answer)
+        self.main_instance.settings.frontend_active = 1
 
 
 class dbusShutdown():
     '''wrapper for shutdown interface provided by the dbus2vdr plugin'''
-    def __init__(self,bus):
+    def __init__(self,bus,main_instance):
+        self.main_instance = main_instance
         self.dbusshutdown = bus.get_object("de.tvdr.vdr","/Shutdown")
         self.interface = 'de.tvdr.vdr.shutdown'
 

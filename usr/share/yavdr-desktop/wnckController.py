@@ -6,10 +6,13 @@ import dbus
 from dbus.mainloop.glib import DBusGMainLoop
 DBusGMainLoop(set_as_default=True)
 import wnck
+import gtk
+import time
 
 class wnckController():
-    def __init__(self,settings):
-        self.settings = settings
+    def __init__(self,main_instance):
+        self.main_instance = main_instance
+        self.settings = main_instance.settings
         self.windows = {
         'softhddevice_main':None,
         'softhddevice_pip':None,
@@ -88,7 +91,7 @@ class wnckController():
             window.set_geometry(0,255,x,y,w,h)
             gdkwindow = gtk.gdk.window_foreign_new(window.get_xid())
             gdkwindow.set_decorations(d)
-        adeskbar.hide()
+        self.main_instance.adeskbar.hide()
 
     def on_window_geochanged(self,window):
         print("Window Geometry changed")
