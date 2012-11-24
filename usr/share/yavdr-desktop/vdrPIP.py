@@ -5,6 +5,7 @@
 import logging
 import os
 import gobject
+import psutil
 import subprocess
 import time
 import dbus
@@ -29,9 +30,10 @@ class vdrPIP():
         -Pstreamdev-client \
         -v /srv/vdr/video.00 \
         --no-kbd''']
-        print self.cmd[0]
+        #print self.cmd[0]
         self.main_instance.hdf.updateKey('vdr.pip.cmd',self.cmd[0])
         self.cmd = [self.main_instance.hdf.readKey('vdr.pip.cmd',self.cmd[0])]
+        logging.info("PIP vdr cmdline: \n %s", self.cmd)
         self.screenX = wnckctrl.screen_height
         self.screenY = wnckctrl.screen_width
         self.pipX = 720 * self.screenX / 1920
@@ -68,6 +70,7 @@ class vdrPIP():
         self.shddbus.SVDRPCommand(dbus.String("deta"),dbus.String(''),dbus_interface=self.interface)
 
     def stopvdr(self):
+        logging.debug("vdrPIP.stopvdr()")
         self.proc.terminate()
 
     def on_exit(self,pid, condition,data):

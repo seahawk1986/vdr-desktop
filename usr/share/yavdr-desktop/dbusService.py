@@ -11,6 +11,7 @@ import logging
 import gtk
 import gobject
 import time
+import psutil
 
 from vdrPIP import vdrPIP
 
@@ -23,6 +24,8 @@ class dbusService(dbus.service.Object):
     @dbus.service.method('de.yavdr.frontend',in_signature='i',out_signature='b')
     def deta(self,active=0):
         self.main_instance.frontend.detach()
+        self.main_instance.vdrCommands.vdrRemote.disable()
+        self.main_instance.settings.frontend_active = 0
         if active == 1:
             self.main_instance.settings.frontend_active = 1
             self.main_instance.settings.external_prog = 1
@@ -31,9 +34,14 @@ class dbusService(dbus.service.Object):
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def atta(self):
-        self.main_instance.frontend.resume(frontend.status())
+        self.main_instance.frontend.attach()
+        self.main_instance.settings.frontend_active = 1
+        self.main_instance.vdrCommands.vdrRemote.enable()
         self.main_instance.settings.external_prog = 0
         return True
+        
+    def stat(self):
+        return self.main_instance.frontend.status()
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def start(self):
@@ -43,18 +51,14 @@ class dbusService(dbus.service.Object):
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def toggle(self):
         if self.main_instance.settings.frontend_active == 0 and self.main_instance.settings.external_prog == 0:
-            status = self.main_instance.frontend.status()
-            if status == "SUSPENDED":
-                self.main_instance.frontend.resume()
-            elif status == "SUSPEND_DETACHED":
-                self.main_instance.frontend.attach()
+            logging.debug('toggle - attach frontend')
+            self.atta()
             self.main_instance.graphtft.graphtft_switch()
             self.main_instance.settings.external_prog = 0
             self.main_instance.settings.frontend_active = 1
-        else:
-            self.main_instance.frontend.detach()
-            self.main_instance.settings.external_prog = 0
-            self.main_instance.settings.frontend_active = 0
+        elif self.main_instance.settings.frontend_active == 1:
+            logging.debug('toggle - detach active frontend')
+            self.deta()
         return True
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
@@ -74,7 +78,7 @@ class dbusService(dbus.service.Object):
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def fullscreen(self):
-        window = self.main_instance.wnckC.windows['softhddevice_main']
+        window = self.main_instance.wnckC.windows['frontend']
         if window:
             gdkwindow = gtk.gdk.window_foreign_new(window.get_xid())
             gdkwindow.set_decorations(0)
@@ -88,7 +92,7 @@ class dbusService(dbus.service.Object):
     def resize(self,s,above,decoration):
         w,h,x,y = self.main_instance.settings.tsplit(s,('x','+'))
         print(x,y,w,h)
-        window = self.main_instance.wnckC.windows['softhddevice_main']
+        window = self.main_instance.wnckC.windows['frontend']
         logging.debug(u'got window %s',window)
         if window:
             gdkwindow = gtk.gdk.window_foreign_new(window.get_xid())
@@ -114,7 +118,7 @@ class dbusService(dbus.service.Object):
         self.main_instance.vdrCommands.vdrRemote.sendkey("POWER")
         if self.main_instance.settings.frontend_active == 0:
             self.main_instance.vdrCommands.vdrRemote.disable()
-        self.main_instance.settings.timer = gobject.timeout_add(15000,soft_detach)
+        self.main_instance.settings.timer = gobject.timeout_add(15000,self.main_instance.mmmmmmsoft_detach)
         return True
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
@@ -154,7 +158,7 @@ class dbusPIP(dbus.service.Object):
 
     @dbus.service.method('de.yavdr.frontend',out_signature='s')
     def win(self):
-        return ", ".join(self.wnckctrl.windows)
+        return "; ".join(self.wnckctrl.windows)
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def start(self):
         if self.vdr.proc == None:
@@ -164,7 +168,7 @@ class dbusPIP(dbus.service.Object):
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def stop(self):
-        main_window = self.wnckctrl.windows['softhddevice_main']
+        main_window = self.wnckctrl.windows['frontend']
         if main_window == None:
             frontend.attach()
             time.sleep(1)
@@ -183,7 +187,7 @@ class dbusPIP(dbus.service.Object):
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def toggle(self):
         pip_window = self.wnckctrl.windows['softhddevice_pip']
-        main_window = self.wnckctrl.windows['softhddevice_main']
+        main_window = self.wnckctrl.windows['frontend']
         if pip_window == None:
             if self.vdr.proc == None:
                 self.vdr.run_vdr()
@@ -194,7 +198,7 @@ class dbusPIP(dbus.service.Object):
             self.vdr.detach()
             #self.vdr.proc.terminate()
             #self.vdr.proc = None
-            main_window = self.wnckctrl.windows['softhddevice_main']
+            main_window = self.wnckctrl.windows['frontend']
             if main_window != None:
                 self.main_instance.frontend.attach()
                 time.sleep(1)
@@ -204,7 +208,7 @@ class dbusPIP(dbus.service.Object):
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def sbs(self):
-        main_window = self.wnckctrl.windows['softhddevice_main']
+        main_window = self.wnckctrl.windows['frontend']
         pip_window = self.wnckctrl.windows['softhddevice_pip']
         if main_window == None:
             self.main_instance.frontend.attach()
@@ -237,19 +241,19 @@ class dbusPIP(dbus.service.Object):
             
     @dbus.service.method('de.yavdr.frontend',out_signature='s')
     def vdr_stop(self):
-        print "stopping vdr"
+        logging.info("stopping pip-vdr")
 
         self.vdr.detach()
-        try:
+        if self.main_instance.pip.vdr:
+            logging.info("stopping pip-vdr")
             self.main_instance.pip.vdr.stopvdr()
-        except: pass
-        vdr_pid = 1
-        while vdr_pid:
-            vdr_pid = [p.pid for p in psutil.process_iter() if "vdr" in str(p.name)]
-            if vdr_pid:
-                print "waiting for VDR exit"
+        vdr_pid = [1]
+        while len(vdr_pid) >1:
+            vdr_pid = [p.pid for p in psutil.process_iter() if str(p.name) == 'vdr']
+            if len(vdr_pid) > 1:
+                logging.info("waiting for PIP-VDR exit")
                 time.sleep(1)
             else:
-                print("vdr terminated")
+                logging.info("pip-vdr terminated")
         main()
         return True
