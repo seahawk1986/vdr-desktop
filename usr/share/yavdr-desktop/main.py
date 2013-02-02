@@ -35,6 +35,9 @@ from wnckController import wnckController
 from adeskbar import adeskbarDBus
 from sxfe import vdrSXFE
 from xine import vdrXINE
+from xbmc import XBMC
+from youtube import YouTube
+from powermanager import PowerManager
 
 class Main():
     def __init__(self,options):
@@ -82,39 +85,69 @@ class Main():
         self.wnckC = wnckController(self)
         self.dbusPIP = dbusService.dbusPIP(self)
         self.adeskbar = adeskbarDBus(self.systembus)
+        self.powermanager = PowerManager(self.systembus)
         self.frontend = None
         self.lircConnection = lircConnection(self,self.vdrCommands) # connect to (event)lircd-Socket
         try:
             self.startup()
+        except dbus.DBusException as error:
+            logging.exception('dbus Error, could not init frontend')
+            if "ServiceUnknown" in error.get_name():
+                logging.error('dbus2vdr not rechable, assuming vdr crashed since entering main instance')
         except:
-            logging.exception('no frontend initialized')
+            logging.exception('something went wrong, could not init frontend')
     
-    def soft_detach():
+    def soft_detach(self):
         self.frontend.detach()
-        settings.timer = gobject.timeout_add(300000,self.dbusService.send_shutdown)
+        self.settings.timer = gobject.timeout_add(300000,self.dbusService.send_shutdown)
         return False
             
     def startup(self):
+        
         self.vdrCommands = vdrDBusCommands(self) # dbus2vdr fuctions
         self.graphtft = GraphTFT(self)
+        self.xbmc = XBMC(self)
+        self.youtube = YouTube(self)
         logging.info('run startup()')
         if self.hdf.readKey('vdr.frontend') == 'softhddevice' and self.vdrCommands.vdrSetup.check_plugin('softhddevice'):
+            self.settings.check_pulseaudio() # Wait until pulseaudio has loaded it's tcp module
             logging.info(u'Configured softhddevide as primary frontend')
+            self.vdrCommands.vdrRemote.enable()
             self.frontend = self.vdrCommands.vdrSofthddevice
         elif self.hdf.readKey('vdr.frontend') == 'sxfe' and self.vdrCommands.vdrSetup.check_plugin('xineliboutput'):
             logging.info('using vdr-sxfe as primary frontend')
             self.frontend = vdrSXFE(self)
+            self.vdrCommands.vdrRemote.enable()
         elif self.hdf.readKey('vdr.frontend') == 'xine' and self.vdrCommands.vdrSetup.check_plugin('xine'):
             logging.info('using xine as primary frontend')
             self.frontend = vdrXINE(self)
+            self.vdrCommands.vdrRemote.enable()
+        elif self.hdf.readKey('vdr.frontend') == 'xbmc':
+            self.frontend = self.xbmc
+            self.settings.vdr_remote = False # Make shure VDR doesn't listen to remote
+            self.vdrCommands.vdrRemote.disable()
         try:
             if self.frontend:
-                logging.debug('self.frontend exists')
-                self.dbusService.atta()
+                if self.settings.manualstart and not self.settings.acpi_wakeup:
+                    logging.debug('self.frontend exists')
+                    self.dbusService.atta()
+                else:
+                    self.graphtft.graphtft_switch()
+                    subprocess.call(["/usr/bin/feh","--bg-fill",self.hdf.readKey('logo_detached')], env=settings.env)
+                    if settings.manualstart == False:
+                        self.settings.timer = gobject.timeout_add(300000, self.dbusService.send_shutdown)
+                    elif self.settings.acpi_wakeup:
+                        if self.vdrCommands.vdrSetup.get('MinUserInactivity')[0] != 0:
+                            interval, default, answer = setup.vdrsetupget("MinEventTimeout")
+                            interval_ms = interval  * 60000 # * 60s * 1000ms
+                            settings.timer = gobject.timeout_add(interval_ms, self.dbusService.setUserInactive)
+                    
             else:
                 logging.debug('self.frontend is None')
+            return False
         except:
             logging.exception('no frontend initialized')
+            return True
         
     def wait_for_vdrstart(self):
         upstart = self.systembus.get_object("com.ubuntu.Upstart", "/com/ubuntu/Upstart")
@@ -144,13 +177,20 @@ class Main():
                     self.startup()
                     self.running = True
                     logging.debug(u"vdr upstart job running")
-                if 'pre-stop' in args[0]:
+                elif 'pre-stop' in args[0]:
                     self.running = False
                     self.dbusService.deta()
                     
                     logging.debug(u"vdr upstart job stopped/waiting")
+                elif 'killed' in args[0]:
+                    if self.settings.external_prog == 0:
+                        self.settings.frontend_active = 0
+                    self.running = False
             elif kwargs['member'] == "InstanceRemoved":
                 logging.debug("killed job")
+                self.running = False
+                if self.settings.external_prog == 0:
+                    self.settings.frontend_active = 0
             elif kwargs['member'] == "InstanceAdded":
                 logging.debug("added upstart-job")
             else:
@@ -159,7 +199,7 @@ class Main():
                 logging.info("VDR is %s", args[0])
                 #logging.info(kwargs)
         
-    def start_app(self,cmd,detachf=True, env=os.environ):
+    def start_app(self,cmd,detachf=True, exitOnPID=True, environment=os.environ):
         logging.info('starting %s',cmd)
         if self.settings.frontend_active == 1 and detachf == True:
             logging.info('detaching frontend')
@@ -170,35 +210,40 @@ class Main():
             self.settings.reattach = 0
         if cmd != ' ' and cmd != None and len(cmd)!=0:
             os.chdir(os.environ['HOME'])
-            logging.info('starting %s',cmd)
-            proc = subprocess.popen(cmd,env=os.env())
-            gobject.child_watch_add(proc.pid,self.on_exit,proc) # Add callback on exit
+            logging.info('starting cmd: %s',cmd)
+            try:
+                self.settings.external_proc[cmd] = subprocess.Popen(cmd, env=environment, shell=True)
+            except:
+                logging.exception('APP-Start failed: %s',cmd)
+            if exitOnPID:
+                gobject.child_watch_add(self.settings.external_proc[cmd].pid,self.on_exit,cmd) # Add callback on exit
 
     def on_exit(self,pid, condition,data):
+        cmd = data
         logging.debug("called function with pid=%s, condition=%s, data=%s",pid, condition,data)
         self.settings.external_prog = 0
+        self.settings.external_proc[cmd] = None
         if condition == 0:
             logging.info(u"normal exit")
             gobject.timeout_add(500,self.reset_external_prog)
         elif condition < 16384:
             logging.warn(u"abnormal exit: %s",condition)
-            gobject.timeout_add(500,reset_external_prog)
+            gobject.timeout_add(500,self.reset_external_prog)
         elif condition == 16384:
             logging.info(u"XBMC shutdown")
             self.dbusService.send_shutdown(user=True)
         elif condition == 16896:
             logging.info(u"XBMC wants a reboot")
+            logging.info(self.powermanager.restart())
         
         return False
         
     def reset_external_prog(self):
         self.settings.external_prog = 0
-        if self.settings.reattach == 1:
+        if self.settings.reattach == 1 and self.settings.frontend_active == 0:
             logging.info("restart vdr-frontend")
-            self.dbusService.toggle()
+            self.dbusService.atta()
             self.settings.frontend_active = 1
-        else:
-            self.settings.frontend_active = 0
         return False
         
      

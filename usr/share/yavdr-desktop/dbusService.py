@@ -24,7 +24,8 @@ class dbusService(dbus.service.Object):
     @dbus.service.method('de.yavdr.frontend',in_signature='i',out_signature='b')
     def deta(self,active=0):
         self.main_instance.frontend.detach()
-        self.main_instance.vdrCommands.vdrRemote.disable()
+        if self.main_instance.settings.vdr_remote:
+            self.main_instance.vdrCommands.vdrRemote.disable()
         self.main_instance.settings.frontend_active = 0
         if active == 1:
             self.main_instance.settings.frontend_active = 1
@@ -32,20 +33,32 @@ class dbusService(dbus.service.Object):
         self.main_instance.graphtft.graphtft_switch()
         return True
 
-    @dbus.service.method('de.yavdr.frontend',out_signature='b')
+    @dbus.service.method('de.yavdr.frontend',out_signature='b',vdr_remote=True)
     def atta(self):
         self.main_instance.frontend.attach()
         self.main_instance.settings.frontend_active = 1
-        self.main_instance.vdrCommands.vdrRemote.enable()
+        if self.main_instance.settings.vdr_remote:
+            self.main_instance.vdrCommands.vdrRemote.enable()
+        else:
+            self.main_instance.vdrCommands.vdrRemote.disable()
         self.main_instance.settings.external_prog = 0
         return True
         
     def stat(self):
         return self.main_instance.frontend.status()
+        
+    def resume(self):
+        self.main_instance.resume()
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def start(self):
         self.main_instance.startup()
+        return True
+        
+    @dbus.service.method('de.yavdr.frontend',out_signature='b')    
+    def setUserInactive(self,user=False):
+        self.send_shutdown(user)
+        self.main_instance.settings.time = gobject.timeout_add(300000,self.send_shutdown)
         return True
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
@@ -63,17 +76,57 @@ class dbusService(dbus.service.Object):
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
     def start_xbmc(self):
+        logging.info("main_instance.settings.external_prog ==%s",self.main_instance.settings.external_prog)
         if not self.main_instance.settings.external_prog == 1:
             self.main_instance.settings.external_prog = 1
-            cmd = ['/usr/lib/xbmc/xbmc.bin','--standalone','--lircdev','/var/run/lirc/lircd']
-            self.main_instance.start_app(cmd)#
+            if self.main_instance.settings.frontend_active == 1:
+                logging.info('detaching frontend')
+                self.main_instance.dbusService.deta()
+                self.main_instance.wnckC.windows['frontend'] = None
+                self.main_instance.settings.reattach = 1
+            else:
+                self.settings.reattach = 0
+            self.main_instance.frontend.detach()
+            self.main_instance.xbmc.attach(False)
             return True
+        else:
+            logging.info("external prog active")
+    
+    @dbus.service.method('de.yavdr.frontend',out_signature='b')
+    def start_youtube(self):
+        logging.info("main_instance.settings.external_prog ==%s",self.main_instance.settings.external_prog)
+        if not self.main_instance.settings.external_prog == 1:
+            self.main_instance.settings.external_prog = 1
+            if self.main_instance.settings.frontend_active == 1:
+                logging.info('detaching frontend')
+                self.main_instance.dbusService.deta()
+                self.main_instance.wnckC.windows['frontend'] = None
+                self.main_instance.settings.reattach = 1
+            else:
+                self.settings.reattach = 0
+            self.main_instance.frontend.detach()
+            self.main_instance.youtube.attach()
+            return True
+        else:
+            logging.info("external prog active")
+            
+    @dbus.service.method('de.yavdr.frontend',out_signature='b')    
+    def stop_xbmc(self):
+        self.main_instance.xbmc.detach()
+        self.main_instance.settings.external_prog = 0
 
-    @dbus.service.method('de.yavdr.frontend',in_signature='si',out_signature='b')
-    def start_application(self,cmd,standalone=0):
-        self.main_instance.settings.external_prog = 1
-        self.main_instance.start_app(cmd)#
-        return True
+    @dbus.service.method('de.yavdr.frontend',in_signature='sii',out_signature='b')
+    def start_application(self,cmd,standalone=0,exitOnPID=1):
+        if cmd == "xbmc" :
+            self.start_xbmc()
+            return True
+        if cmd == "youtube":
+            self.start_youtube()
+        else:
+            if standalone: self.main_instance.settings.external_prog = 1
+            else: self.main_instance.settings.external_prog = 0
+            self.main_instance.start_app(cmd,standalone,exitOnPID)#
+            return True
         
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
@@ -87,6 +140,11 @@ class dbusService(dbus.service.Object):
             window.maximize()
             window.activate(int(time.strftime("%s",time.gmtime())))
         return True
+        
+    @dbus.service.method('de.yavdr.frontend',in_signature='s',out_signature='is')
+    def play(self,path):
+        answer, msg = self.main_instance.vdrCommands.vdrRecordings.play_recording(dbus.String(path))
+        return answer, msg
 
     @dbus.service.method('de.yavdr.frontend',in_signature='sii',out_signature='b')
     def resize(self,s,above,decoration):
@@ -118,7 +176,7 @@ class dbusService(dbus.service.Object):
         self.main_instance.vdrCommands.vdrRemote.sendkey("POWER")
         if self.main_instance.settings.frontend_active == 0:
             self.main_instance.vdrCommands.vdrRemote.disable()
-        self.main_instance.settings.timer = gobject.timeout_add(15000,self.main_instance.mmmmmmsoft_detach)
+        self.main_instance.settings.timer = gobject.timeout_add(15000,self.main_instance.soft_detach)
         return True
 
     @dbus.service.method('de.yavdr.frontend',out_signature='b')
@@ -238,6 +296,11 @@ class dbusPIP(dbus.service.Object):
             return True
         else:
             return False
+            
+    @dbus.service.method('de.yavdr.frontend',in_signature='s',out_signature='is')
+    def play(self,path):
+        answer, msg = self.vdr.play_recording(dbus.String(path))
+        return answer, msg
             
     @dbus.service.method('de.yavdr.frontend',out_signature='s')
     def vdr_stop(self):

@@ -14,11 +14,36 @@ class vdrDBusCommands():
         self.vdrSetup = dbusVDRSetup(main_instance.systembus)
         self.vdrShutdown = dbusShutdown(main_instance.systembus,main_instance)
         self.vdrRemote = dbusRemote(main_instance.systembus)
+        self.vdrRecordings = dbusRecordings(main_instance)
         if self.vdrSetup.check_plugin('softhddevice'):
             self.vdrSofthddevice = dbusSofthddeviceFrontend(main_instance,self)
             logging.debug(u'softhddevice has been loaded by VDR')
         else:
             logging.info(u'softhddevice has not been loaded by VDR')
+            
+class dbusRecordings():
+    def __init__(self,main_instance):
+        self.main_instance = main_instance
+        self.bus = self.main_instance.systembus
+        self.dbusrecordings = self.bus.get_object("de.tvdr.vdr","/Recordings")
+        self.interface = 'de.tvdr.vdr.recording'
+        
+    def get_recordings(self):
+        reclist = self.dbusrecordings.List(dbus_interface=self.interface)
+        try:
+            recordings = {name: value for (name, value) in reclist}
+            logging.info("new method to enlist recordings successfull")
+        except:
+            recordings = {}
+            for recording in reclist:
+                recordings[recording[0]] = dict(recording[1])
+            logging.exception("Fallback to old method to enlist recordings")
+        finally:
+            return recordings
+        
+    def play_recording(self,recording):
+        answer, msg = self.dbusrecordings.Play(recording,dbus_interface = self.interface, signature='v')
+        return answer, msg
 
         
 class dbusVDRSetup():
@@ -56,6 +81,15 @@ class dbusRemote():
     def __init__(self,bus):
         self.dbusremote = bus.get_object("de.tvdr.vdr","/Remote")
         self.interface = 'de.tvdr.vdr.remote'
+        
+    def channel(self,action=""):
+        answer, msg = self.dbusremote.SwitchChannel(dbus.String(action),dbus_interface=self.interface)
+        chnum,chname = msg.split(' ',1)
+        if answer == 250:
+            return chnum,chname
+        else:
+            logging.error('incorrect argument %s: %s:\n%s',action,answer,msg)
+            return None,msg
 
     def sendkey(self,key):
         answer, message = self.dbusremote.HitKey(dbus.String(key),dbus_interface=self.interface)
@@ -71,7 +105,11 @@ class dbusRemote():
         else: return False
 
     def disable(self):
-        answer, message = self.dbusremote.Disable(dbus_interface=self.interface)
+        try:
+            answer, message = self.dbusremote.Disable(dbus_interface=self.interface)
+        except:
+            logging.exception('could not disable remote via dbus')
+            answer, message = self.dbusremote.Disable(dbus_interface=self.interface)
         if answer == 250: return True
         else: return False
 
@@ -111,18 +149,11 @@ class dbusSofthddeviceFrontend():
         display = u"-d "+self.main_instance.hdf.readKey('yavdr.desktop.display')+".0"
         reply, answer = self.dbusfe.SVDRPCommand(dbus.String("ATTA"),display,dbus_interface=self.interface)
         logging.debug(u"got answer %s: %s",reply,answer)
-        self.main_instance.vdrCommands.vdrRemote.enable()
-        self.main_instance.settings.frontend_active = 1
 
     def detach(self,active=0):
         logging.debug(u"detaching softhddevice frontend")
         reply, answer = self.dbusfe.SVDRPCommand(dbus.String("DETA"),dbus.String(None),dbus_interface=self.interface)
         logging.debug(u"got answer %s: %s",reply,answer)
-        self.parent.vdrRemote.disable()
-        self.main_instance.settings.frontend_active = 0
-        if active == 1:
-            self.main_instance.settings.frontend_active = 1
-            self.main_instance.settings.external_prog = 1
         return True
 
     def resume(self):
